@@ -321,3 +321,22 @@ def test_handoff_to_agent_payload_with_mockllm(planted):
                        context_features=planted.profile_features)
     resp = asyncio.run(MockLLM().call_model("qwen3:14b", [{"role": "user", "content": task.payload["abstract"]}]))
     assert resp.model_name == "qwen3:14b" and resp.tokens_in > 5
+
+
+def test_folder_without_csv_uses_file_names_as_ids(tmp_path):
+    """The input folder is enough: no papers.csv, no LaTeX source."""
+    (tmp_path / "in").mkdir()
+    make_planted_pdf(tmp_path / "in" / "my_paper.pdf")
+    make_control_pdf(tmp_path / "in" / "note.pdf")
+    rc = parse_main(["--pdf-dir", str(tmp_path / "in"), "--src-dir", str(tmp_path / "none"),
+                     "--csv", str(tmp_path / "missing.csv"), "--out", str(tmp_path / "out")])
+    assert rc == 0
+    assert sorted(p.name for p in (tmp_path / "out").glob("*.json")) == ["my_paper.json", "note.json"]
+    doc = from_json(ParsedPaper, (tmp_path / "out" / "my_paper.json").read_text())
+    assert doc.title == "Planted Regret Study" and doc.category == ""     # title read from the PDF itself
+
+
+def test_empty_input_folder_returns_error(tmp_path):
+    (tmp_path / "in").mkdir()
+    assert parse_main(["--pdf-dir", str(tmp_path / "in"), "--out", str(tmp_path / "out"),
+                       "--csv", str(tmp_path / "x.csv")]) == 1

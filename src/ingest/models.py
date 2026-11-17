@@ -1,10 +1,9 @@
-"""Extra structures produced by ingestion (B1).
+# Created: 2026-11-17
+# Created by: Lathika
+# Purpose: Data models for paper ingestion. Defines ParsedPaper, a PaperDoc
+#          subclass that adds equation numbers and context, figure captions with
+#          citing paragraphs, and table text, plus JSON save/load helpers.
 
-`ParsedPaper` IS-A `PaperDoc`: every field of the frozen schema is kept as-is, so
-any code that expects a PaperDoc keeps working. The extras (equation numbers and
-context, figure captions, ...) are additive and have defaults. If Person A wants
-them in schemas.py, promote them through a PR both approve.
-"""
 from typing import List, Optional
 
 from pydantic import BaseModel, Field

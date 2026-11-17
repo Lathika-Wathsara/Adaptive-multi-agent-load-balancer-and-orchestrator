@@ -1,9 +1,9 @@
-"""Profile features of a parsed paper (B1) -> PaperDoc.profile_features.
+# Created: 2026-11-17
+# Created by: Lathika
+# Purpose: Compute profile features of a parsed paper: token estimate, section,
+#          equation, figure, table and reference counts, and per-1k-token densities.
+#          Used as LinUCB context features and by the planner.
 
-Raw counts and densities only; Person A normalises them for the LinUCB context.
-Token length is a character-count estimate (chars / 4), good enough for a context
-feature and free of extra dependencies.
-"""
 import argparse
 import csv
 import re

@@ -1,11 +1,7 @@
-"""B1 live check on REAL parsed papers: automatic gates + a spot-check sheet for your eyes.
-
-    python3 -m src.ingest.parse_pdf --ids t01 t05 e03 e05 m01          # parse first
-    python3 scripts/ingest_check.py --report data/papers/parsed/spotcheck.md
-
-Exit code 0 only if >= --need papers pass every gate. The plan's "Done when" also needs you
-to compare equations and references with the PDF by eye: tick the boxes in the report.
-"""
+# Created: 2026-11-17
+# Created by: Lathika
+# Purpose: Live check on real parsed papers: runs automatic pass/fail gates and
+#          writes a spot-check sheet for comparing equations and references by eye.
 import argparse
 import sys
 from pathlib import Path

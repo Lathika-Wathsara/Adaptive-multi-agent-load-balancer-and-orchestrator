@@ -2,6 +2,7 @@ export CODE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export DATA=$HOME/data/Adaptive-multi-agent-load-balancer-and-orchestrator
 export SIF=$DATA/paper_review.sif
 export OLLAMA_PORT=11500
+export PYTHONPATH=/data/pylibs${PYTHONPATH:+:$PYTHONPATH}
 
 export APPTAINER_CACHEDIR=$HOME/data/.apptainer/cache
 export APPTAINER_TMPDIR=$HOME/data/.apptainer/tmp

@@ -1,13 +1,10 @@
-"""Equations from an arXiv LaTeX source archive (B1).
+# Created: 2026-11-17
+# Created by: Lathika
+# Purpose: Extract display equations from an arXiv LaTeX source archive.
+#          Reads .tex files safely in memory, expands \input/\include, and returns
+#          each equation with its number, label, section and surrounding text.
 
-Far more reliable than reading equations out of PDF text. Nothing is written to
-disk: archive members are read into memory, only .tex/.bbl names are accepted, and
-absolute or '..' paths are skipped (downloaded archives are untrusted).
 
-Known limits: custom macros that hide \\begin{equation} (e.g. \\be ... \\ee) are not
-expanded, and equation numbers are reconstructed (standard LaTeX counting, with
-\\numberwithin{equation}{section} and \\appendix handled). `label` is the stable id.
-"""
 import gzip
 import io
 import re

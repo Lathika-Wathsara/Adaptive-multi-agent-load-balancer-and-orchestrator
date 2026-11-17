@@ -1,4 +1,9 @@
-"""PDF (+ optional arXiv LaTeX source) -> ParsedPaper JSON (B1).
+# Created: 2026-11-17
+# Created by: Lathika
+# Purpose: Parse a paper PDF with PyMuPDF into a ParsedPaper JSON: title,
+#          sections, equations (LaTeX source first, PDF fallback), cropped figures
+#          with captions, tables, and references. Also provides the batch CLI.
+"""PDF (+ optional arXiv LaTeX source) -> ParsedPaper JSON .
 
     python3 -m src.ingest.parse_pdf --csv data/papers.csv --pdf-dir data/papers/pdf \
         --src-dir data/papers/src --out data/papers/parsed [--ids t01 e02]
@@ -42,7 +47,8 @@ CANON = {
 _NUM_HEAD = re.compile(r"^\d+(?:\.\d+){0,3}\.?\s+[A-Za-z]")
 _LET_HEAD = re.compile(r"^[A-Z](?:\.\d+){0,2}\.?\s+[A-Z]")        # appendix headings
 _ROM_HEAD = re.compile(r"^[IVX]{1,4}\.\s+[A-Z]")
-_CAPTION = re.compile(r"^\s*(Figure|Fig\.|FIGURE|FIG\.|Table|TABLE)\s*(\d+|[IVX]+)\s*[:.|–—\-]\s*", re.I)
+# Matches "Figure 2: ...", "Fig. 3. ...", and IEEE-style "TABLE I TITLE" (no punctuation).
+_CAPTION = re.compile(r"^\s*(Figure|Fig\.|FIGURE|FIG\.|Table|TABLE)\s*(\d+|[IVX]+)(?:\s*[:.|\u2013\u2014\-]\s*|\s+(?=[A-Z]{2,}))")
 _EQNUM = re.compile(r"^(?P<body>.*\S)\s+\((?P<num>\d{1,3}(?:\.\d{1,2})?)\)\s*$")
 _MATHY = re.compile(r"[=<>≤≥∈∑∫∏±×≈→∂∇]")
 
@@ -583,39 +589,59 @@ def parse_paper(
     doc.close()
     return paper
 
+def load_metadata(csv_path):
+    """Optional labels from papers.csv: {id: row}. No file means no labels."""
+    if not csv_path or not Path(csv_path).exists():
+        return {}
+    with open(csv_path, newline="", encoding="utf-8") as fh:
+        return {row["id"]: row for row in csv.DictReader(fh)}
+
+
+def parse_folder(pdf_dir, out_dir, src_dir=None, csv_path=None, ids=None):
+    """Parse every PDF in pdf_dir. The file name without .pdf is the paper id.
+
+    If src_dir/<id>.tar.gz exists it is used for equations (LaTeX source).
+    Writes out_dir/<id>.json for each paper and returns the list of ParsedPaper.
+    """
+    meta = load_metadata(csv_path)
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    papers = []
+    for pdf in sorted(Path(pdf_dir).glob("*.pdf")):
+        pid = pdf.stem
+        if ids and pid not in ids:
+            continue
+        row = meta.get(pid, {})                       # category/title are optional
+        src = Path(src_dir) / f"{pid}.tar.gz" if src_dir else None
+        paper = parse_paper(
+            str(pdf), pid, out_dir,
+            title=row.get("title", ""), category=row.get("category", ""),
+            arxiv_id=row.get("arxiv_id", ""),
+            src_archive=str(src) if src and src.exists() else None,
+        )
+        (Path(out_dir) / f"{pid}.json").write_text(to_json(paper), encoding="utf-8")
+        pf = paper.profile_features
+        print(f"[{pid}] sec={int(pf['n_sections']):2d} eq={int(pf['n_equations']):3d}"
+              f"({paper.equation_source}) fig={int(pf['n_figures']):2d} tab={int(pf['n_tables']):2d} "
+              f"ref={int(pf['n_references']):3d} tok~{int(pf['n_tokens_est'])}")
+        papers.append(paper)
+    return papers
+
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--csv", default="data/papers.csv")
-    ap.add_argument("--pdf-dir", default="data/papers/pdf")
-    ap.add_argument("--src-dir", default="data/papers/src")
+    ap.add_argument("--pdf-dir", default="data/papers/pdf")      # the input folder
+    ap.add_argument("--src-dir", default="data/papers/src")      # optional LaTeX sources
     ap.add_argument("--out", default="data/papers/parsed")
+    ap.add_argument("--csv", default="data/papers.csv")          # optional labels
     ap.add_argument("--ids", nargs="*", default=None)
     args = ap.parse_args(argv)
 
-    Path(args.out).mkdir(parents=True, exist_ok=True)
-    with open(args.csv, newline="", encoding="utf-8") as fh:
-        rows = list(csv.DictReader(fh))
-    ok = 0
-    for r in rows:
-        pid = r["id"]
-        if args.ids and pid not in args.ids:
-            continue
-        pdf = Path(args.pdf_dir) / f"{pid}.pdf"
-        if not pdf.exists():
-            print(f"[{pid}] missing {pdf} (run scripts/download_papers.py)")
-            continue
-        src = Path(args.src_dir) / f"{pid}.tar.gz"
-        paper = parse_paper(str(pdf), pid, args.out, title=r.get("title", ""), category=r.get("category", ""),
-                            arxiv_id=r.get("arxiv_id", ""), src_archive=str(src) if src.exists() else None)
-        (Path(args.out) / f"{pid}.json").write_text(to_json(paper), encoding="utf-8")
-        pf = paper.profile_features
-        print(f"[{pid}] {paper.category:9s} sec={int(pf['n_sections']):2d} eq={int(pf['n_equations']):3d}"
-              f"({paper.equation_source}) fig={int(pf['n_figures']):2d} tab={int(pf['n_tables']):2d} "
-              f"ref={int(pf['n_references']):3d} tok~{int(pf['n_tokens_est'])}")
-        ok += 1
-    print(f"parsed {ok} paper(s) -> {args.out}")
-    return 0 if ok else 1
+    papers = parse_folder(args.pdf_dir, args.out, args.src_dir, args.csv, args.ids)
+    if not papers:
+        print(f"no PDFs found in {args.pdf_dir}")
+        return 1
+    print(f"parsed {len(papers)} paper(s) -> {args.out}")
+    return 0
 
 
 if __name__ == "__main__":

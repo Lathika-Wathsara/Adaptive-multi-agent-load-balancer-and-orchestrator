@@ -3,3 +3,6 @@ Added ollama
 downloaded models in the data folder in symlink
 created run_in_sif for container (apptainer) image run
 checked the models
+
+How to install python packages to the image
+run_in_sif python3 -m pip install --target /data/pylibs "pymupdf>=1.24.3" pytest
