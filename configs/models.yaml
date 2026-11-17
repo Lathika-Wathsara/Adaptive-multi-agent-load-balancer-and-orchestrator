@@ -1,0 +1,69 @@
+# Filename: configs/models.yaml
+# Created: 2026-11-17
+# Created by: Thulashan
+# Purpose: Define model capabilities, routing eligibility, and serving settings.
+
+models:
+  "qwen3:4b":
+    enabled: true
+    supports:
+      - general
+    max_concurrent: 1
+
+  "qwen3:14b":
+    enabled: true
+    supports:
+      - general
+      - math
+    max_concurrent: 1
+
+  "deepseek-r1:7b":
+    enabled: true
+    supports:
+      - math
+    max_concurrent: 1
+
+  "qwen2.5vl:7b":
+    enabled: true
+    supports:
+      - vision
+    max_concurrent: 1
+
+  "gemma3:4b":
+    enabled: true
+    supports:
+      - math
+      - vision
+    max_concurrent: 1
+
+task_eligibility:
+  general:
+    - "qwen3:4b"
+    - "qwen3:14b"
+
+  math:
+    - "deepseek-r1:7b"
+    - "qwen3:14b"
+    - "gemma3:4b"
+
+  vision:
+    - "qwen2.5vl:7b"
+    - "gemma3:4b"
+
+serving:
+  provider: ollama
+  base_url: "http://127.0.0.1:11500"
+  gpu_id: 0
+  temperature: 0
+  use_mock: true
+  request_timeout_seconds: 600
+  max_concurrent_total: 2
+  task_timeout_seconds: 900
+
+routing:
+  policy: linucb
+  context_dimension: 16
+  context_version: 1
+  alpha: 1.0
+  regularization: 1.0
+  learning_enabled: false
