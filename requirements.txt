@@ -19,4 +19,5 @@ tomli==2.5.0
 typing_extensions==4.16.0
 tzdata==2026.6
 httpx==0.28.1
-pydanic==2.14.3
+pydantic==2.14.3
+PyYAML==6.0.3
