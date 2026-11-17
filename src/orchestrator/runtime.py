@@ -139,7 +139,7 @@ def main():
             "Paper, config, output, and checkpoint paths must be distinct."
         )
 
-        started = time.perf_counter()
+    started = time.perf_counter()
 
     try:
         result = asyncio.run(

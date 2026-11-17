@@ -235,6 +235,3 @@ class FeedbackManager:
 
         manager._applied = set(applied)
         return manager
-
-        self._applied.add(decision_id)
-        del self._pending[decision_id]
