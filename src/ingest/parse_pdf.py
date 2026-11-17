@@ -629,9 +629,9 @@ def parse_folder(pdf_dir, out_dir, src_dir=None, csv_path=None, ids=None):
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--pdf-dir", default="data/papers/pdf")      # the input folder
-    ap.add_argument("--src-dir", default="data/papers/src")      # optional LaTeX sources
-    ap.add_argument("--out", default="data/papers/parsed")
+    ap.add_argument("--pdf-dir", default="/data/papers/pdf")      # the input folder
+    ap.add_argument("--src-dir", default="/data/papers/src")      # optional LaTeX sources
+    ap.add_argument("--out", default="/data/papers/parsed")
     ap.add_argument("--csv", default="data/papers.csv")          # optional labels
     ap.add_argument("--ids", nargs="*", default=None)
     args = ap.parse_args(argv)

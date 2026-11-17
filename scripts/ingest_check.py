@@ -41,13 +41,13 @@ def sample(items, k=3):
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--parsed", default="data/papers/parsed")
+    ap.add_argument("--parsed", default="/data/papers/parsed")
     ap.add_argument("--ids", nargs="*", default=DEFAULT_IDS)
     ap.add_argument("--need", type=int, default=5)
     ap.add_argument("--report", default="")
     args = ap.parse_args()
 
-    md, passed = ["# B1 spot-check sheet", ""], 0
+    md, passed = ["# Spot-check sheet", ""], 0
     for pid in args.ids:
         f = Path(args.parsed) / f"{pid}.json"
         if not f.exists():

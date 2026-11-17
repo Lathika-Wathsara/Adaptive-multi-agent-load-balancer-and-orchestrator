@@ -1,9 +1,7 @@
-"""B1 tests: ingestion. No model is called here, so MockLLM only appears in the hand-off test.
-
-Planted PDFs are generated with PyMuPDF at test time (nothing to download, no PDFs in git).
-Ground truth is known by construction: 2 numbered equations, 1 figure, 1 table, 3 references.
-The "clean control" PDF has prose only and must yield no equations, figures, tables or references.
-"""
+# Created: 2026-11-17
+# Created by: Lathika
+# Purpose: Pytest tests for paper ingestion using planted PDFs and LaTeX cases with known
+#          answers, plus a prose-only clean control. No network or real models needed.
 import asyncio
 import csv
 import gzip
