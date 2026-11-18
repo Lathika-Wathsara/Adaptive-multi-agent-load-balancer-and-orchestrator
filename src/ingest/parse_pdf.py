@@ -3,15 +3,17 @@
 # Purpose: Parse a paper PDF with PyMuPDF into a ParsedPaper JSON: title,
 #          sections, equations (LaTeX source first, PDF fallback), cropped figures
 #          with captions, tables, and references. Also provides the batch CLI.
-"""PDF (+ optional arXiv LaTeX source) -> ParsedPaper JSON .
+"""PDF (+ optional LaTeX source) -> ParsedPaper JSON.
 
-    python3 -m src.ingest.parse_pdf --csv data/papers.csv --pdf-dir data/papers/pdf \
-        --src-dir data/papers/src --out data/papers/parsed [--ids t01 e02]
+    python3 -m src.ingest.parse_pdf [--ids <paper id> ...]
 
-Layout handled: one or two columns, numbered / canonical headings, "Figure N:" and
-"Table N:" captions, numbered or hanging-indent reference lists. Equations come from
-the LaTeX source when it parses, otherwise from numbered display lines in the PDF
-(a weak fallback: spot-check them).
+Every PDF in /data/papers/pdf is parsed. The file name without .pdf is the paper id.
+If /data/papers/src/<id>.tar.gz exists, equations are read from the LaTeX source,
+otherwise from numbered display lines in the PDF (a weak fallback: spot-check them).
+Output goes to /data/papers/parsed. An optional data/papers.csv adds category labels.
+
+Layout handled: one or two columns, numbered or canonical headings, "Figure N" and
+"Table N" captions, numbered or hanging-indent reference lists.
 """
 from __future__ import annotations
 
@@ -345,7 +347,7 @@ def _mathy(s: str) -> bool:
     return len(s) <= 300 and len(long_words) <= 4 and (bool(_MATHY.search(s)) or len(re.findall(r"[+\-/^_]", s)) >= 2)
 
 
-_NUMTAIL = re.compile(r"\(((?:[A-Z]\.)?\d{1,3}(?:\.\d{1,2})?)\)\s*$")
+_NUMTAIL = re.compile(r"\(((?:[A-Z]\.)?\d{1,3}(?:\.\d{1,2})?[a-z]?)\)\s*$")
 
 
 def _eq_candidates(pb: List[Blk]) -> List[Tuple[Blk, str]]:
@@ -533,7 +535,7 @@ def parse_paper(
         if len(longest) >= 300:
             sections = collections.OrderedDict([("Abstract", [longest])] + list(sections.items()))
 
-    # 4. citing paragraphs for B4
+    # 4. paragraphs that cite each figure or table (used later to compare text with figures)
     def citing(label: str) -> List[str]:
         kind, num = label.split()
         pat = (r"\b(?:Figure|Fig\.|Figs\.)\s*" if kind == "Figure" else r"\bTables?\s*") + re.escape(num) + r"\b"
