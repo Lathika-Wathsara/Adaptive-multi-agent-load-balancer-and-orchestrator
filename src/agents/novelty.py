@@ -25,6 +25,7 @@ from rapidfuzz import fuzz
 from src.agents.ref_verifier import normalize
 from src.common.schemas import AgentResult, Finding
 from src.tools import embedder, scholar
+from functools import partial
 
 CLAIM_MODEL = "qwen3:4b-instruct"   # small model: pulls the claims out of the paper
 COMPARE_MODEL = "qwen3:14b"         # large model: compares a claim with related work
@@ -43,6 +44,7 @@ HUMAN_LIST_SCORE = 0.75             # pool papers at this cosine are listed for 
 HUMAN_LIST_MAX = 5
 LOW_LIST_MAX = 3                    # closest papers shown when nothing reaches the floor
 QUOTE_MATCH = 85                    # how well a quote must appear in the abstract it cites
+NOVEL_CHECK_MAX = 3                 # papers the strict check tries on a "novel" verdict (0 = off)
 
 
 def paper_text(paper):
@@ -108,6 +110,11 @@ async def extract_claims(paper, client, model=CLAIM_MODEL, max_claims=MAX_CLAIMS
             claims.append({"claim": claim, "query": str(item.get("query") or claim).strip()})
     return claims[:max_claims]
 
+def default_sources(paper_year=None):
+    """The normal sources plus a citation-sorted OpenAlex search (papers up to paper_year),
+    so well-known earlier papers are found even when their wording differs from the query."""
+    cited = partial(scholar.search_openalex_cited, before_year=paper_year)
+    return scholar.SOURCES + [("openalex_cited", cited)]
 
 def retrieve(queries, sources=None, limit=RETRIEVE_LIMIT):
     """Search every source with every query and merge duplicates (keep the record
@@ -306,9 +313,8 @@ def memoize_embed(embed):
 
     return cached
 
-
 async def check_claim(item, pool, paper, client, sources, embed, paper_year,
-                      compare_model, top_k, max_retries):
+                      compare_model, top_k, max_retries, verify_novel=0):
     """Judge one claim against the shared pool, searching again when the judge asks,
     and return its record. New papers found on a retry are added to the pool."""
     tried = [item["query"], item["claim"]]            # already searched for all claims
@@ -331,9 +337,9 @@ async def check_claim(item, pool, paper, client, sources, embed, paper_year,
         rounds += 1
         add_to_pool(pool, await asyncio.to_thread(retrieve, outcome["search_next"], sources))
 
+    cited_titles = {c["title"] for c in outcome["cited"]}
+    others = [c for c in ranked_all[:top_k] if c["title"] not in cited_titles]
     if step == "final" and outcome["verdict"] in ("already_known", "partly_known"):
-        cited_titles = {c["title"] for c in outcome["cited"]}
-        others = [c for c in ranked_all[:top_k] if c["title"] not in cited_titles]
         backed = await find_support(item["claim"], outcome["cited"], others, client, compare_model)
         if backed:
             outcome["evidence"] = [dict(evidence_list([c])[0], quote=q) for c, q in backed]
@@ -341,6 +347,15 @@ async def check_claim(item, pool, paper, client, sources, embed, paper_year,
             step = "human"
             outcome["doubts"] = (outcome["doubts"] + " " if outcome["doubts"] else "") + \
                 "No retrieved abstract states the claim (verification failed)."
+    elif step == "final" and outcome["verdict"] == "novel" and verify_novel > 0:
+        # A judge that says "novel" can be wrong: the cited papers (then the others) get the
+        # strict check too, at most verify_novel papers. A quote-backed hit makes it partly_known.
+        shown = (outcome["cited"] + others)[:verify_novel]
+        backed = await find_support(item["claim"], shown, [], client, compare_model)
+        if backed:
+            outcome["verdict"] = "partly_known"
+            outcome["reason"] = "The judge said novel, but a retrieved abstract states it. " + outcome["reason"]
+            outcome["evidence"] = [dict(evidence_list([c])[0], quote=q) for c, q in backed]
 
     record = {"claim": item["claim"], "query": item["query"], "verdict": outcome["verdict"],
               "reason": outcome["reason"], "confidence": outcome["confidence"],
@@ -363,15 +378,19 @@ def paper_queries(paper):
 
 async def check_novelty(paper, client, sources=None, embed=None, paper_year=None,
                         claim_model=CLAIM_MODEL, compare_model=COMPARE_MODEL,
-                        max_claims=MAX_CLAIMS, top_k=TOP_K, max_retries=MAX_RETRIES):
+                        max_claims=MAX_CLAIMS, top_k=TOP_K, max_retries=MAX_RETRIES,
+                        verify_novel=NOVEL_CHECK_MAX):
     """Run the whole novelty check on a PaperDoc and return an AgentResult.
 
     client: anything with async call_model(model=..., messages=...) such as LLMClient.
     sources / embed: replaceable for tests; default is the real APIs and Ollama.
     paper_year: papers published after this year are not counted as prior work.
     max_retries: how many extra search rounds the judge may ask for per claim.
+    verify_novel: how many papers the strict quote check tries on a "novel" verdict
+                  (costs one large-model call each; 0 switches it off).
     """
     embed = memoize_embed(embedder.embed if embed is None else embed)
+    sources = default_sources(paper_year) if sources is None else sources
     claims = await extract_claims(paper, client, claim_model, max_claims)
 
     # One pool for the whole paper: a paper found for one claim can be used by the others.
@@ -383,7 +402,7 @@ async def check_novelty(paper, client, sources=None, embed=None, paper_year=None
     results = []
     for item in claims:
         results.append(await check_claim(item, pool, paper, client, sources, embed, paper_year,
-                                         compare_model, top_k, max_retries))
+                                         compare_model, top_k, max_retries, verify_novel))
     return to_agent_result(results)
 
 

@@ -113,6 +113,11 @@ def first(result):
 
 # helpers -------------------------------------------------------------------
 
+def run(client, sources, **kw):
+    kw.setdefault("verify_novel", 0)          # most tests do not use the check on "novel"
+    return asyncio.run(novelty.check_novelty(PAPER, client, sources=sources,
+                                             embed=fake_embed, **kw))
+
 def test_parse_json_ignores_think_blocks_and_chatter():
     text = '<think>hmm {not json}</think> Sure! {"a": 1} Done.'
     assert novelty.parse_json(text) == {"a": 1}
@@ -360,10 +365,35 @@ def test_partly_known_is_verified_too():
     assert client.calls["verify"] == 1
 
 
-def test_novel_is_not_verified():
+def test_novel_is_not_verified_when_the_check_is_off():
     client = FakeClient(CLAIMS, [reply("novel", 0.9)])
-    run(client, db(BEAM))
+    run(client, db(BEAM), verify_novel=0)
     assert client.calls["verify"] == 0
+
+
+def test_novel_is_flipped_when_an_abstract_states_the_claim():
+    client = FakeClient(CLAIMS, [reply("novel", 0.9)])
+    result = run(client, db(BEAM), verify_novel=3)
+    rec = first(result)
+    assert rec["verdict"] == "partly_known" and rec["decision"] == "final"
+    assert rec["evidence"][0]["quote"] == QUOTE and "judge said novel" in rec["reason"]
+    assert [f.type for f in result.findings] == ["novelty_partial"]
+
+
+def test_novel_stays_novel_when_no_abstract_states_it():
+    client = FakeClient(CLAIMS, [reply("novel", 0.9)], verify=lambda p: support(False))
+    rec = first(run(client, db(BEAM, BEAM_B, CAKE), verify_novel=3))
+    assert rec["verdict"] == "novel" and rec["decision"] == "final"
+
+
+def test_novel_check_tries_at_most_the_allowed_number_of_papers():
+    client = FakeClient(CLAIMS, [reply("novel", 0.9, closest=())], verify=lambda p: support(False))
+    run(client, db(BEAM, BEAM_B), verify_novel=1)
+    assert client.calls["verify"] == 1
+
+
+def test_novel_check_is_on_by_default():
+    assert novelty.NOVEL_CHECK_MAX == 3
 
 
 BEAM_B = dict(BEAM, title="Beamformers that save energy", doi="10.1/b", url="https://doi.org/10.1/b",
@@ -451,3 +481,17 @@ def test_human_item_shows_closest_papers_even_below_the_floor():
     assert rec["decision"] == "human" and rec["verdict"] == "unchecked"
     assert rec["best_matches"][0]["url"] == "https://doi.org/10.1/cake"
     assert rec["best_matches"][0]["low_similarity"] is True
+
+
+def test_default_sources_add_a_citation_sorted_search_up_to_the_paper_year(monkeypatch):
+    seen = {}
+
+    def fake(query, limit=15, before_year=None):
+        seen["year"] = before_year
+        return [BEAM]
+
+    monkeypatch.setattr(novelty.scholar, "search_openalex_cited", fake)
+    sources = novelty.default_sources(2017)
+    assert [name for name, _ in sources][-1] == "openalex_cited"
+    assert sources[-1][1]("q", 15) == [BEAM] and seen["year"] == 2017
+

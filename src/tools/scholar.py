@@ -112,15 +112,13 @@ def search_crossref(query, limit=5):
                                 item.get("URL"), abstract, "crossref"))
     return found
 
-
-def search_openalex(query, limit=5):
-    params = {"search": query, "per-page": limit}
+def _openalex_search(params):
+    """Run one OpenAlex works search and return the papers in the common shape."""
     if EMAIL:
         params["mailto"] = EMAIL
     key = keys.get_key("OPENALEX_API_KEY")
     headers = {"Authorization": f"Bearer {key}"} if key else {}
     data = get_json("https://api.openalex.org/works", params, headers)
-    #data = get_json("https://api.openalex.org/works", params)
     found = []
     for item in data.get("results", []):
         authors = [
@@ -134,6 +132,42 @@ def search_openalex(query, limit=5):
             item.get("publication_year"), doi, item.get("doi") or item.get("id"),
             _openalex_abstract(item.get("abstract_inverted_index")), "openalex"))
     return found
+
+
+def search_openalex(query, limit=5):
+    return _openalex_search({"search": query, "per-page": limit})
+
+
+def search_openalex_cited(query, limit=15, before_year=None):
+    """Same search, but the most cited papers first. Famous earlier papers show up even
+    when their wording differs from the query. before_year keeps only papers published
+    up to that year, so newer papers do not fill the list."""
+    params = {"search": query, "per-page": limit, "sort": "cited_by_count:desc"}
+    if before_year:
+        params["filter"] = f"to_publication_date:{before_year}-12-31"
+    return _openalex_search(params)
+
+# def search_openalex(query, limit=5):
+#     params = {"search": query, "per-page": limit}
+#     if EMAIL:
+#         params["mailto"] = EMAIL
+#     key = keys.get_key("OPENALEX_API_KEY")
+#     headers = {"Authorization": f"Bearer {key}"} if key else {}
+#     data = get_json("https://api.openalex.org/works", params, headers)
+#     #data = get_json("https://api.openalex.org/works", params)
+#     found = []
+#     for item in data.get("results", []):
+#         authors = [
+#             _family(a["author"]["display_name"])
+#             for a in item.get("authorships", [])
+#             if a.get("author", {}).get("display_name")
+#         ]
+#         doi = (item.get("doi") or "").replace("https://doi.org/", "")
+#         found.append(_candidate(
+#             item.get("title") or item.get("display_name"), authors,
+#             item.get("publication_year"), doi, item.get("doi") or item.get("id"),
+#             _openalex_abstract(item.get("abstract_inverted_index")), "openalex"))
+#     return found
 
 
 def search_semantic_scholar(query, limit=5):

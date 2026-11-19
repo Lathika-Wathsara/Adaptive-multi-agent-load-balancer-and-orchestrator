@@ -103,3 +103,29 @@ def test_empty_response_gives_empty_list(monkeypatch):
     assert scholar.search_crossref("x") == []
     assert scholar.search_openalex("x") == []
     assert scholar.search_semantic_scholar("x") == []
+
+
+def test_cited_search_sorts_by_citations_and_limits_the_year(monkeypatch):
+    seen = {}
+
+    def fake(url, params, headers):
+        seen.update(params)
+        return OPENALEX
+
+    monkeypatch.setattr(scholar, "_http_get", fake)
+    found = scholar.search_openalex_cited("hybrid beamforming", limit=15, before_year=2017)
+    assert seen["sort"] == "cited_by_count:desc"
+    assert seen["filter"] == "to_publication_date:2017-12-31"
+    assert found[0]["title"] == "Hybrid beamforming survey"
+
+
+def test_cited_search_without_a_year_has_no_date_filter(monkeypatch):
+    seen = {}
+
+    def fake(url, params, headers):
+        seen.update(params)
+        return OPENALEX
+
+    monkeypatch.setattr(scholar, "_http_get", fake)
+    scholar.search_openalex_cited("hybrid beamforming")
+    assert "filter" not in seen
