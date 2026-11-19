@@ -222,8 +222,11 @@ def decide(verdict, confidence, test_status):
 
 
 def for_pdf_text(decision):
-    """Equations read from PDF text are often garbled: lower the finding and ask a human."""
+    """Equations read from PDF text are often garbled. A test-confirmed error is lowered to medium;
+    an error nobody confirmed with numbers becomes a low "please look" note. Always ask a human."""
     kind, severity, confidence, _ = decision
+    if kind == "math_error" and severity == "medium":
+        return ("math_unsure", "low", UNSURE_CONF, True)
     return (kind, "medium" if severity == "high" else severity, min(confidence, PDF_CONF_MAX), True)
 
 
@@ -297,5 +300,12 @@ async def check_math(paper, client, model=MATH_MODEL, numbers=None, max_equation
     steps = build_steps(paper, numbers, max_equations)
     records = []
     for step in steps:                              # one at a time: one GPU
-        records.append(await check_step(step, client, model, timeout))
+        try:
+            records.append(await check_step(step, client, model, timeout))
+        except Exception as error:                  # a model timeout must not lose the other equations
+            records.append({"number": step["number"], "latex": step["latex"], "source": step["source"],
+                            "verdict": "unchecked", "error_type": "none", "restated": "",
+                            "reason": f"the model call failed: {type(error).__name__}",
+                            "confidence": 0.0, "test": {"status": "none", "detail": ""},
+                            "decision": None, "reply_end": ""})
     return to_agent_result(records)

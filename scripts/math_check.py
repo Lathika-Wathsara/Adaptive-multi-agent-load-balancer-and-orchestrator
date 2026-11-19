@@ -128,11 +128,12 @@ async def main():
     ap.add_argument("--model", default=MATH_MODEL)
     ap.add_argument("--cases", nargs="*", type=int, default=[1, 2, 3, 4])
     ap.add_argument("--numbers", nargs="*", default=None, help="equation numbers to check")
+    ap.add_argument("--skip-planted", action="store_true", help="only run the control papers")
     args = ap.parse_args()
 
     client = LLMClient(use_mock=False, ollama_url=OLLAMA_URL)
     print(f"math model: {args.model}")
-    passed = await run_planted(client, args.model, args.cases)
+    passed = True if args.skip_planted else await run_planted(client, args.model, args.cases)
 
     for paper_id in args.ids:
         paper = from_json(ParsedPaper, (Path(args.parsed) / f"{paper_id}.json").read_text(encoding="utf-8"))

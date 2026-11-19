@@ -310,3 +310,25 @@ def test_error_confirmed_by_a_left_right_snippet():
     client = FakeClient({"2": reply("error", 0.7)}, tests={"2": f"```python\n{SNIPPET_BAD}\n```"})
     f = run(client).findings[0]
     assert (f.type, f.severity, f.confidence) == ("math_error", "high", mc.CONFIRMED_CONF)
+
+
+
+def test_model_failure_on_one_equation_keeps_the_others():
+    class Flaky(FakeClient):
+        async def call_model(self, model, messages, images=None):
+            if "Equation (2):" in messages[1]["content"]:
+                raise TimeoutError("slow model")
+            return await super().call_model(model, messages, images)
+
+    result = run(Flaky({}))
+    records = json.loads(result.raw_output)
+    assert [r["verdict"] for r in records] == ["ok", "unchecked", "ok"]
+    assert "TimeoutError" in records[1]["reason"] and result.findings == []
+
+
+def test_unconfirmed_error_on_pdf_text_is_only_a_low_note():
+    pdf_paper = ParsedPaper(id="p3", equation_meta=[
+        EquationInfo(index=0, number="2", latex="d = |a|^2 + |b|^2 + 2 Re(a b^*)", source="pdf")])
+    result = run(FakeClient({"2": reply("error", 0.8)}), doc=pdf_paper)
+    f = result.findings[0]
+    assert (f.type, f.severity) == ("math_unsure", "low") and result.needs_human is True
