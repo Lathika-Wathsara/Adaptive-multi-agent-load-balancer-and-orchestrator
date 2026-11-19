@@ -83,3 +83,10 @@ def test_refused_code_never_runs():
 def test_memory_hog_is_stopped():
     result = sc.run_test("import numpy as np\nx = np.ones((20000, 20000))\nprint('PASS')")
     assert result["status"] == "error"
+
+
+def test_values_printed_after_the_verdict_line():
+    result = sc.run_test("print('FAIL')\nprint(1.5, 2.5)")
+    assert result["status"] == "fail" and "1.5" in result["detail"]
+    result = sc.run_test("print('PASS')\nprint('checked 5 points')")
+    assert result["status"] == "pass"

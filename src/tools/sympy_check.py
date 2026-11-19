@@ -65,14 +65,15 @@ def refuse_reason(code):
 
 
 def read_output(stdout):
-    """Turn the last printed line into (status, detail)."""
+    """Find the last line that starts with PASS or FAIL and turn it into (status, detail).
+    A model may print its values on the lines after FAIL, so the last line is not always it."""
     lines = [line.strip() for line in stdout.strip().splitlines() if line.strip()]
-    last = lines[-1] if lines else ""
-    if last.upper().startswith("PASS"):
-        return "pass", last[:MAX_OUTPUT]
-    if last.upper().startswith("FAIL"):
-        return "fail", last[:MAX_OUTPUT]
-    return "error", "the test did not print PASS or FAIL"
+    for i in range(len(lines) - 1, -1, -1):
+        word = lines[i].upper()
+        if word.startswith("PASS") or word.startswith("FAIL"):
+            detail = " | ".join(lines[i:i + 3])[:MAX_OUTPUT]
+            return ("pass" if word.startswith("PASS") else "fail"), detail
+    return "error", "the test did not print PASS or FAIL; it printed: " + " | ".join(lines[-3:])[:150]
 
 
 def run_test(code, timeout=TIMEOUT):

@@ -50,7 +50,7 @@ class FakeClient:
         self.prompts.append(prompt)
         number = next(line.split("(")[1].split(")")[0] for line in prompt.splitlines()
                       if line.startswith("Equation ("))
-        if "Write one short Python test" in prompt:
+        if "Write a short Python snippet" in prompt:
             self.test_calls = getattr(self, "test_calls", 0) + 1
             return ModelResponse(text=self.tests.get(number, "NONE"), model_name=model, latency=0.0)        
         queue = self.replies.get(number)
@@ -288,3 +288,25 @@ def test_test_is_only_requested_for_errors_without_code():
     client = FakeClient({"1": reply("ok"), "2": reply("error", 0.8, code=TEST_BAD), "3": reply("ok")})
     run(client)
     assert getattr(client, "test_calls", 0) == 0
+    
+
+# ------------------------------------------------- the comparison is added by the checker
+SNIPPET_BAD = "import numpy as np\nx = np.random.default_rng(0).normal(size=5)\nleft = x + 1\nright = x - 1\n"
+SNIPPET_GOOD = "import numpy as np\nx = np.random.default_rng(0).normal(size=5)\nleft = x + 1\nright = 1 + x\n"
+
+
+def test_add_compare_only_for_left_right_snippets():
+    assert mc.add_compare("print('PASS')") == "print('PASS')"
+    assert mc.add_compare("left = 1\nright = 2\nprint('FAIL')").count("_np") == 0
+    assert "allclose" in mc.add_compare(SNIPPET_GOOD)
+
+
+def test_left_right_snippet_gives_fail_and_pass_in_the_sandbox():
+    assert mc.sympy_check.run_test(mc.add_compare(SNIPPET_BAD))["status"] == "fail"
+    assert mc.sympy_check.run_test(mc.add_compare(SNIPPET_GOOD))["status"] == "pass"
+
+
+def test_error_confirmed_by_a_left_right_snippet():
+    client = FakeClient({"2": reply("error", 0.7)}, tests={"2": f"```python\n{SNIPPET_BAD}\n```"})
+    f = run(client).findings[0]
+    assert (f.type, f.severity, f.confidence) == ("math_error", "high", mc.CONFIRMED_CONF)

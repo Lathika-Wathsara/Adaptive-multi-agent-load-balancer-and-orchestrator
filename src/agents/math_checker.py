@@ -94,12 +94,13 @@ def make_context(step):
 def make_test_prompt(step):
     """Second, focused request: only the numeric test (small models skip it when it is optional)."""
     return make_context(step) + (
-        "Write one short Python test (numpy and sympy only) for this step. It draws random "
-        "values with a fixed seed, evaluates both sides exactly as the paper writes them (do "
-        "not correct the paper's equation; if the step rewrites the previous equation, compare "
-        "the two expressions), and prints PASS if they agree within 1e-6, otherwise FAIL "
-        "followed by both values. Reply with the python code block only. If the step cannot "
-        "be tested on numbers, reply NONE.")
+        "Write a short Python snippet (numpy only) for this step. Draw random values with "
+        "np.random.default_rng(0), then set two variables: left and right, the two sides "
+        "evaluated exactly as the paper writes them (do not correct the paper's equation; if "
+        "the step rewrites the previous equation, left is the previous expression and right is "
+        "this one). For an inequality, set left to the check (an all(...) of the comparison) "
+        "and right to True. Do not print anything and do not compare them yourself. Reply "
+        "with the python code block only. If the step cannot be tested on numbers, reply NONE.")        
 
 
 def make_prompt(step):
@@ -112,17 +113,34 @@ def make_prompt(step):
         "or a modelling assumption cannot be wrong: answer ok. If the LaTeX is garbled, cut "
         "off, or needs context you do not have, answer unsure.\n"
         "3. If the step is an identity or inequality you can evaluate on numbers, write a short "
-        "Python test using only numpy and sympy. It draws random values with a fixed seed, "
-        "evaluates both sides exactly as the paper writes them (do not correct the paper's "
-        "equation inside the test), and prints PASS if they agree within 1e-6, or FAIL "
-        "followed by both values. If the step rewrites the previous equation, compare the two "
-        "expressions. Skip the test for definitions.\n\n"
+        "Python snippet using only numpy. Draw random values with np.random.default_rng(0), "
+        "then set two variables: left and right, the two sides evaluated exactly as the paper "
+        "writes them (do not correct the paper's equation). If the step rewrites the previous "
+        "equation, left is the previous expression and right is this one. For an inequality, "
+        "set left to the check (an all(...) of the comparison) and right to True. Do not print "
+        "or compare anything yourself. Skip the test for definitions.\n\n"
         "Reply with one JSON object (no LaTeX backslashes inside its text), then, only if you "
         "wrote a test, one python code block:\n"
         '{"restated": "...", "verdict": "ok" or "error" or "unsure", '
         '"error_type": "sign" or "missing_term" or "factor" or "index" or "other" or "none", '
         '"reason": "one or two sentences", "confidence": 0.0 to 1.0}')
 
+_LEFT = re.compile(r"^left\s*=", re.M)
+_RIGHT = re.compile(r"^right\s*=", re.M)
+COMPARE = (
+    "\nimport numpy as _np\n"
+    "_l = _np.asarray(left, dtype=complex)\n"
+    "_r = _np.asarray(right, dtype=complex)\n"
+    "print('PASS' if _np.allclose(_l, _r, rtol=1e-6, atol=1e-9) else 'FAIL')\n"
+    "print('left =', _l.ravel()[:3])\n"
+    "print('right =', _r.ravel()[:3])\n")
+
+
+def add_compare(code):
+    """If the snippet sets left and right, add the comparison and the PASS/FAIL print ourselves."""
+    if _LEFT.search(code) and _RIGHT.search(code) and "PASS" not in code and "FAIL" not in code:
+        return code + COMPARE
+    return code
 
 def split_code(text):
     """(text without think block and python blocks, first python block or ""). A json or
@@ -238,7 +256,7 @@ async def check_step(step, client, model=MATH_MODEL, timeout=sympy_check.TIMEOUT
     if not code and verdict == "error":           # confirm a suspected error with numbers
         code = await ask_test(step, client, model)
     if code:
-        record["test"] = await asyncio.to_thread(sympy_check.run_test, code, timeout)
+        record["test"] = await asyncio.to_thread(sympy_check.run_test, add_compare(code), timeout)
     status = record["test"]["status"] if record["test"]["status"] in ("pass", "fail") else "none"
     record["decision"] = decide(verdict, confidence, status)
     if record["decision"] and step["source"] == "pdf":
