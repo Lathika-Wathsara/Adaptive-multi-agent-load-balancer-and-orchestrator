@@ -38,7 +38,8 @@ class FakeClient:
     """Answers each equation from a dict {equation number: reply text or list of texts}.
     The equation is found in the prompt ("Equation (2): ...")."""
 
-    def __init__(self, replies, default=None):
+    def __init__(self, replies, default=None, tests=None):
+        self.tests = tests or {}                      # {equation number: reply to "write the test"}
         self.replies = {k: (list(v) if isinstance(v, list) else [v]) for k, v in replies.items()}
         self.default = default or reply("ok")
         self.models, self.prompts = [], []
@@ -49,6 +50,9 @@ class FakeClient:
         self.prompts.append(prompt)
         number = next(line.split("(")[1].split(")")[0] for line in prompt.splitlines()
                       if line.startswith("Equation ("))
+        if "Write one short Python test" in prompt:
+            self.test_calls = getattr(self, "test_calls", 0) + 1
+            return ModelResponse(text=self.tests.get(number, "NONE"), model_name=model, latency=0.0)        
         queue = self.replies.get(number)
         text = (queue.pop(0) if len(queue) > 1 else queue[0]) if queue else self.default
         return ModelResponse(text=text, model_name=model, latency=0.0)
@@ -240,3 +244,47 @@ def test_reply_end_is_kept_for_unreadable_replies():
     client = FakeClient({"2": "I cannot say"})
     records = json.loads(run(client).raw_output)
     assert records[1]["reply_end"] == "I cannot say"
+
+
+
+# ------------------------------------------------- reading fenced replies, asking for the test
+def test_json_in_a_fence_followed_by_a_python_block():
+    text = ("```json\n" + json.dumps({"verdict": "error", "confidence": 0.8}) + "\n```\n\n"
+            "```python\nprint('FAIL 1 2')\n```")
+    data, code = mc.read_reply(text)
+    assert data["verdict"] == "error" and code == "print('FAIL 1 2')"
+
+
+def test_python_block_before_a_json_fence_and_unmarked_code():
+    text = "```python\nd = {'a': 1}\nprint('PASS')\n```\n```json\n{\"verdict\": \"ok\"}\n```"
+    data, code = mc.read_reply(text)
+    assert data["verdict"] == "ok" and "print('PASS')" in code
+    data, code = mc.read_reply('{"verdict": "ok"}\n```\nx = 1\nprint("PASS")\n```')
+    assert data["verdict"] == "ok" and "print(" in code
+
+
+def test_error_without_code_asks_for_the_test_and_a_failing_test_confirms_it():
+    client = FakeClient({"2": reply("error", 0.7, error_type="sign")},
+                        tests={"2": f"```python\n{TEST_BAD}\n```"})
+    result = run(client)
+    f = result.findings[0]
+    assert (f.type, f.severity, f.confidence) == ("math_error", "high", mc.CONFIRMED_CONF)
+    assert client.test_calls == 1 and result.needs_human is False
+
+
+def test_test_writer_saying_none_leaves_the_error_unverified():
+    client = FakeClient({"2": reply("error", 0.7)}, tests={"2": "NONE"})
+    f = run(client).findings[0]
+    assert (f.type, f.severity) == ("math_error", "medium")
+
+
+def test_passing_test_from_the_test_writer_sends_the_error_to_a_human():
+    client = FakeClient({"2": reply("error", 0.9)}, tests={"2": f"```python\n{TEST_GOOD}\n```"})
+    result = run(client)
+    assert [f.type for f in result.findings] == ["math_unsure"] and result.needs_human is True
+
+
+def test_test_is_only_requested_for_errors_without_code():
+    client = FakeClient({"1": reply("ok"), "2": reply("error", 0.8, code=TEST_BAD), "3": reply("ok")})
+    run(client)
+    assert getattr(client, "test_calls", 0) == 0

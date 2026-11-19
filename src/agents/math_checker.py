@@ -27,7 +27,7 @@ ERROR_TYPES = ("sign", "missing_term", "factor", "index", "other", "none")
 _RELATION = re.compile(r"=|<|>|≤|≥|≈|\\le\b|\\ge\b|\\leq|\\geq|\\approx|\\equiv")
 _NUMBERED = re.compile(r"^\((\S+?)\)\s+(.*)$", re.S)        # "(3) x = y" as stored in PaperDoc
 _THINK = re.compile(r"<think>.*?</think>", re.S)
-_CODE = re.compile(r"```(?:python)?\s*\n(.*?)```", re.S)
+_FENCE = re.compile(r"```([A-Za-z]*)[ \t]*\n(.*?)```", re.S)     # a fenced block: (language, body)
 _LONE_BACKSLASH = re.compile(r'\\(?!["\\/bfnrtu])')    # LaTeX such as \alpha is not valid JSON
 
 SYSTEM = ("You are a careful mathematician checking one step of a derivation in a research "
@@ -74,7 +74,8 @@ def build_steps(paper, numbers=None, max_equations=MAX_EQUATIONS):
 
 
 # ------------------------------------------------------------------------ model calls
-def make_prompt(step):
+def make_context(step):
+    """The equation with everything the model may need to read it."""
     prev = "none"
     if step["previous"]:
         prev = f"({step['previous'][0]}) {step['previous'][1]}"
@@ -87,7 +88,22 @@ def make_prompt(step):
         f"Text before the equation: {step['before'] or '(none)'}\n"
         f"Previous equation: {prev}\n"
         f"Equation ({step['number']}): {step['latex']}\n"
-        f"Text after the equation: {step['after'] or '(none)'}\n\n"
+        f"Text after the equation: {step['after'] or '(none)'}\n\n")
+
+
+def make_test_prompt(step):
+    """Second, focused request: only the numeric test (small models skip it when it is optional)."""
+    return make_context(step) + (
+        "Write one short Python test (numpy and sympy only) for this step. It draws random "
+        "values with a fixed seed, evaluates both sides exactly as the paper writes them (do "
+        "not correct the paper's equation; if the step rewrites the previous equation, compare "
+        "the two expressions), and prints PASS if they agree within 1e-6, otherwise FAIL "
+        "followed by both values. Reply with the python code block only. If the step cannot "
+        "be tested on numbers, reply NONE.")
+
+
+def make_prompt(step):
+    return make_context(step) + (
         "Do this:\n"
         "1. Restate in one or two sentences what the step claims (what equals what, or what "
         "follows from the previous equation).\n"
@@ -105,20 +121,30 @@ def make_prompt(step):
         "wrote a test, one python code block:\n"
         '{"restated": "...", "verdict": "ok" or "error" or "unsure", '
         '"error_type": "sign" or "missing_term" or "factor" or "index" or "other" or "none", '
-        '"reason": "one or two sentences", "confidence": 0.0 to 1.0}'
-    )
+        '"reason": "one or two sentences", "confidence": 0.0 to 1.0}')
+
+
+def split_code(text):
+    """(text without think block and python blocks, first python block or ""). A json or
+    unmarked block keeps its text, because models often put their JSON answer in one."""
+    text = _THINK.sub("", text)
+    if "<think>" in text:                       # thinking that never finished: no answer yet
+        text = text[:text.index("<think>")]
+    code = []
+
+    def take(found):
+        language, body = found.group(1).lower(), found.group(2)
+        if language in ("python", "py") or (language == "" and "print(" in body):
+            code.append(body.strip())
+            return ""
+        return body
+
+    return _FENCE.sub(take, text), (code[0] if code else "")
 
 
 def read_reply(text):
     """Split a model reply into (JSON dict or None, test code or "")."""
-    text = _THINK.sub("", text)
-    if "<think>" in text:                       # thinking that never finished: no answer yet
-        text = text[:text.index("<think>")]
-    code = ""
-    found = _CODE.search(text)
-    if found:
-        code = found.group(1).strip()
-        text = text[:found.start()] + text[found.end():]
+    text, code = split_code(text)
     start, end = text.find("{"), text.rfind("}")
     data = None
     if 0 <= start < end:
@@ -149,6 +175,13 @@ async def ask_model(step, client, model):
                                         "(verdict must be ok, error or unsure), then the code block if any."}]
     return None, "", reply.text
 
+
+async def ask_test(step, client, model):
+    """Ask only for the numeric test of one step. Returns the code, or "" if there is none."""
+    messages = [{"role": "system", "content": SYSTEM},
+                {"role": "user", "content": make_test_prompt(step)}]
+    reply = await client.call_model(model=model, messages=messages)
+    return split_code(reply.text)[1]
 
 # ------------------------------------------------------------------------- the decision
 def decide(verdict, confidence, test_status):
@@ -202,7 +235,8 @@ async def check_step(step, client, model=MATH_MODEL, timeout=sympy_check.TIMEOUT
         record["verdict"] = "unchecked"           # nothing to report; kept in raw_output
         record["reply_end"] = last_reply[-600:]
         return record
-
+    if not code and verdict == "error":           # confirm a suspected error with numbers
+        code = await ask_test(step, client, model)
     if code:
         record["test"] = await asyncio.to_thread(sympy_check.run_test, code, timeout)
     status = record["test"]["status"] if record["test"]["status"] in ("pass", "fail") else "none"
@@ -210,7 +244,7 @@ async def check_step(step, client, model=MATH_MODEL, timeout=sympy_check.TIMEOUT
     if record["decision"] and step["source"] == "pdf":
         record["decision"] = for_pdf_text(record["decision"])
     if not code and verdict != "ok":
-        record["reply_end"] = last_reply[-600:]   # why did the model write no test?
+        record["reply_end"] = last_reply[-600:]   # why is there no test?
     return record
 
 
