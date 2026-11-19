@@ -12,11 +12,12 @@ import time
 from pathlib import Path
 
 import httpx
+from src.tools import keys
 
 # Cache lives in the shared data folder, never in the repo.
 CACHE_DIR = Path(os.environ.get("SCHOLAR_CACHE_DIR", "/data/cache/scholar"))
 EMAIL = os.environ.get("SCHOLAR_EMAIL", "")      # sent to Crossref/OpenAlex (polite pool)
-S2_KEY = os.environ.get("S2_API_KEY", "")        # optional Semantic Scholar key
+#S2_KEY = os.environ.get("S2_API_KEY", "")        # optional Semantic Scholar key
 
 # Minimum seconds between two requests to the same host.
 MIN_GAP = {
@@ -41,7 +42,7 @@ def _http_get(url, params, headers):
         resp = httpx.get(url, params=params, headers=headers, timeout=30)
         _last_call[host] = time.time()
         if resp.status_code == 429:          # too many requests: wait and retry
-            time.sleep(2 * attempt)
+            time.sleep(2 ** attempt)
             continue
         if resp.status_code == 404:          # nothing found
             return {}
@@ -116,7 +117,10 @@ def search_openalex(query, limit=5):
     params = {"search": query, "per-page": limit}
     if EMAIL:
         params["mailto"] = EMAIL
-    data = get_json("https://api.openalex.org/works", params)
+    key = keys.get_key("OPENALEX_API_KEY")
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    data = get_json("https://api.openalex.org/works", params, headers)
+    #data = get_json("https://api.openalex.org/works", params)
     found = []
     for item in data.get("results", []):
         authors = [
@@ -138,7 +142,8 @@ def search_semantic_scholar(query, limit=5):
         "limit": limit,
         "fields": "title,year,authors,abstract,externalIds,url",
     }
-    headers = {"x-api-key": S2_KEY} if S2_KEY else {}
+    key = keys.get_key("S2_API_KEY")
+    headers = {"x-api-key": key} if key else {}
     data = get_json("https://api.semanticscholar.org/graph/v1/paper/search",
                     params, headers)
     found = []

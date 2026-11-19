@@ -1,5 +1,5 @@
 # Created: 2026-11-18
-# Updated: 2026-11-18 (pauses between requests and retries when OpenAlex says 429)
+# Updated: 2026-11-18 (pauses between requests, retries on 429, uses the OpenAlex key)
 # Created by: Lathika
 # Purpose: Temporary experiment, no language models. For several queries a claim extractor
 #          could plausibly produce, shows where a known original paper lands in OpenAlex
@@ -10,9 +10,15 @@
 # Usage: python3 scripts/retrieval_probe.py
 
 import os
+import sys
 import time
+from pathlib import Path
 
 import httpx
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from src.tools import keys  # noqa: E402
 
 URL = "https://api.openalex.org/works"
 EMAIL = os.environ.get("SCHOLAR_EMAIL", "")
@@ -37,11 +43,11 @@ TESTS = [
 ]
 
 
-def fetch(params):
+def fetch(params, headers):
     """One OpenAlex request; waits and retries when the server says 429."""
     for attempt in range(RETRIES):
         time.sleep(PAUSE)
-        resp = httpx.get(URL, params=params, timeout=60)
+        resp = httpx.get(URL, params=params, headers=headers, timeout=60)
         if resp.status_code != 429:
             resp.raise_for_status()
             return resp.json()["results"]
@@ -49,7 +55,7 @@ def fetch(params):
     return None
 
 
-def rank_of(original, query, year, sort, limit):
+def rank_of(original, query, year, sort, limit, headers):
     """Position (1-based) of the original in the OpenAlex results, "-" if it is not
     there, or "429" if the server kept refusing."""
     params = {"search": query, "per-page": limit, "select": "title",
@@ -58,7 +64,7 @@ def rank_of(original, query, year, sort, limit):
         params["sort"] = sort
     if EMAIL:
         params["mailto"] = EMAIL
-    results = fetch(params)
+    results = fetch(params, headers)
     if results is None:
         return "429"
     for i, work in enumerate(results, 1):
@@ -68,13 +74,18 @@ def rank_of(original, query, year, sort, limit):
 
 
 def main():
+    keys.ask_for_keys()
+    key = keys.get_key("OPENALEX_API_KEY")
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    print("using an OpenAlex key" if key else "no OpenAlex key (shared daily budget)")
+
     for original, year, queries in TESTS:
         print(f"\n=== {original} (papers up to {year})")
         print(f"{'relevance 15':>13} {'relevance 50':>13} {'citations 15':>13}  query")
         for query in queries:
-            rel15 = rank_of(original, query, year, None, 15)
-            rel50 = rank_of(original, query, year, None, 50)
-            cite15 = rank_of(original, query, year, "cited_by_count:desc", 15)
+            rel15 = rank_of(original, query, year, None, 15, headers)
+            rel50 = rank_of(original, query, year, None, 50, headers)
+            cite15 = rank_of(original, query, year, "cited_by_count:desc", 15, headers)
             print(f"{rel15:>13} {rel50:>13} {cite15:>13}  {query}", flush=True)
 
 

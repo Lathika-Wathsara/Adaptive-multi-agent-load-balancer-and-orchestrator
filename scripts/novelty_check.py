@@ -22,6 +22,8 @@ from src.agents.novelty import check_novelty  # noqa: E402
 from src.common.schemas import PaperDoc  # noqa: E402
 from src.serving.client import LLMClient  # noqa: E402
 from src.tools.embedder import OLLAMA_URL  # noqa: E402
+from src.tools import keys  # noqa: E402
+keys.ask_for_keys()
 
 OUT_DIR = Path("/data/novelty")
 

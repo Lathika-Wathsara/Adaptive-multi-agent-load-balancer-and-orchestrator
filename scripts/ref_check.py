@@ -10,6 +10,8 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from src.tools import keys  # noqa: E402
+keys.ask_for_keys()
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
