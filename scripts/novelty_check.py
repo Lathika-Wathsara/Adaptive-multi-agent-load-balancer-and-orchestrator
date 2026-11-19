@@ -90,6 +90,7 @@ async def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("ids", nargs="*", help="parsed paper ids to run as controls")
     ap.add_argument("--parsed", default="/data/papers/parsed")
+    ap.add_argument("--year", type=int, default=None, help="publication year of the control papers")
     args = ap.parse_args()
 
     client = LLMClient(use_mock=False, ollama_url=OLLAMA_URL)
@@ -112,7 +113,7 @@ async def main():
         data = json.loads((Path(args.parsed) / f"{paper_id}.json").read_text(encoding="utf-8"))
         paper = PaperDoc(**{k: v for k, v in data.items() if k in PaperDoc.model_fields})
         start = time.time()
-        show(paper, await check_novelty(paper, client), time.time() - start)
+        show(paper, await check_novelty(paper, client, paper_year=args.year), time.time() - start)
         print("control paper: read the verdicts and URLs above by hand")
 
     print("\nPASS" if passed else "\nCHECK BY HAND")

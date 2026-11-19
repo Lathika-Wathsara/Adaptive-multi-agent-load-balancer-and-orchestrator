@@ -495,3 +495,18 @@ def test_default_sources_add_a_citation_sorted_search_up_to_the_paper_year(monke
     assert [name for name, _ in sources][-1] == "openalex_cited"
     assert sources[-1][1]("q", 15) == [BEAM] and seen["year"] == 2017
 
+
+def test_another_version_of_the_paper_is_dropped_even_with_a_different_title():
+    abstract = PAPER.sections["Abstract"]
+    other_version = dict(BEAM, title="A totally different title", doi="10.1/v2",
+                         abstract=abstract + " Extra text that only the longer version has.")
+    keep = novelty.usable([other_version, BEAM], PAPER.title,
+                          paper_abstract=novelty.own_abstract(PAPER))
+    assert keep == [BEAM]
+
+
+def test_own_abstract_uses_the_abstract_section_or_the_first_one():
+    assert novelty.own_abstract(PAPER) == PAPER.sections["Abstract"]
+    no_name = PaperDoc(id="x", title="T", sections={"Intro": "first text", "Other": "second"})
+    assert novelty.own_abstract(no_name) == "first text"
+

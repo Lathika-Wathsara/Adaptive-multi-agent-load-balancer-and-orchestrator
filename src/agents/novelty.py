@@ -35,6 +35,7 @@ MIN_ABSTRACT = 50                   # shorter abstracts cannot be compared
 RETRIEVE_LIMIT = 15                 # papers asked from each source per query
 MIN_SIMILARITY = 0.70               # below this cosine a paper is not worth comparing
 SAME_PAPER = 90                     # title score at or above this: it is the paper itself
+SAME_ABSTRACT = 90                  # abstract match that also means "this is the paper itself"
 VERDICTS = ("novel", "partly_known", "already_known")
 
 MAX_RETRIES = 1                     # extra search rounds the judge may ask for
@@ -98,7 +99,12 @@ async def extract_claims(paper, client, model=CLAIM_MODEL, max_claims=MAX_CLAIMS
               "contribution (new method, new result, new bound, improved performance).")
     user = (
         f"Paper:\n{paper_text(paper)}\n\n"
-        f"List at most {max_claims} distinct novelty claims. For each give the claim as "
+        f"List at most {max_claims} distinct novelty claims. Only claims about the idea itself "
+        "count: the method, architecture, formulation, algorithm, metric or theoretical result. "
+        "Skip claims that only report numbers from the paper's own simulations or experiments "
+        "(for example 'achieves 40% improvement'). For each give the claim as "
+        "one self-contained sentence and a search query of 4 to 8 keywords that would "
+        'find prior work on it. Reply with JSON only: {"claims": [{"claim": "...", "query": "..."}]}'
         "one self-contained sentence and a search query of 4 to 8 keywords that would "
         'find prior work on it. Reply with JSON only: {"claims": [{"claim": "...", "query": "..."}]}'
     )
@@ -134,14 +140,33 @@ def retrieve(queries, sources=None, limit=RETRIEVE_LIMIT):
     return list(best.values())
 
 
-def usable(cands, paper_title, paper_year=None):
-    """Drop papers that cannot count as prior work: no abstract, the paper itself,
-    or published after the paper."""
+def own_abstract(paper):
+    """The paper's own abstract (the first section if none is called abstract)."""
+    for name, text in paper.sections.items():
+        if "abstract" in name.lower():
+            return text
+    return next(iter(paper.sections.values()), "")
+
+
+def is_same_paper(cand, paper_title, paper_abstract=""):
+    """True if a retrieved record is the paper under review (another version of it):
+    a near-identical title, or the start of its abstract appears in the paper's abstract."""
+    if paper_title and fuzz.ratio(normalize(cand["title"]), normalize(paper_title)) >= SAME_PAPER:
+        return True
+    if len(paper_abstract) >= MIN_ABSTRACT:
+        start = normalize(cand["abstract"])[:300]
+        return fuzz.partial_ratio(start, normalize(paper_abstract)[:1500]) >= SAME_ABSTRACT
+    return False
+
+
+def usable(cands, paper_title, paper_year=None, paper_abstract=""):
+    """Drop papers that cannot count as prior work: no abstract, the paper itself
+    (any version), or published after the paper."""
     keep = []
     for c in cands:
         if len(c["abstract"]) < MIN_ABSTRACT:
             continue
-        if paper_title and fuzz.ratio(normalize(c["title"]), normalize(paper_title)) >= SAME_PAPER:
+        if is_same_paper(c, paper_title, paper_abstract):
             continue
         if paper_year and c["year"] and c["year"] > paper_year:
             continue
@@ -320,7 +345,7 @@ async def check_claim(item, pool, paper, client, sources, embed, paper_year,
     tried = [item["query"], item["claim"]]            # already searched for all claims
     rounds = 0
     while True:
-        candidates = usable(list(pool.values()), paper.title, paper_year)
+        candidates = usable(list(pool.values()), paper.title, paper_year, own_abstract(paper))
         ranked_all = await asyncio.to_thread(rank, item["claim"], candidates, embed,
                                              len(candidates), MIN_SIMILARITY)
         if ranked_all:

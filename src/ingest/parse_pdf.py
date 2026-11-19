@@ -461,7 +461,14 @@ def parse_paper(
     if not title and first:
         top = [b for b in first if b.bbox[1] < 0.4 * pages[0].rect.height and len(b.text.strip()) >= 8]
         if top:
-            title = _para(max(top, key=lambda b: b.size).text)
+            big = max(top, key=lambda b: b.size)
+            same = sorted((b for b in top if abs(b.size - big.size) < 0.5), key=lambda b: b.bbox[1])
+            lo = hi = same.index(big)
+            while lo > 0 and same[lo].bbox[1] - same[lo - 1].bbox[3] <= big.size:
+                lo -= 1                                # a title can span several blocks (lines)
+            while hi < len(same) - 1 and same[hi + 1].bbox[1] - same[hi].bbox[3] <= big.size:
+                hi += 1
+            title = _para(" ".join(b.text for b in same[lo:hi + 1]))
 
     sections: Dict[str, List[str]] = collections.OrderedDict()
     ref_blocks: List[Blk] = []
@@ -497,8 +504,8 @@ def parse_paper(
             if any(z.contains(ctr) or (z & ctr).get_area() > 0.6 * ctr.get_area() for z in zones.get(pno, [])):
                 continue
             t = b.text.strip()
-            if pno == 0 and title and _para(t) == _para(title):
-                continue
+            if pno == 0 and title and len(_para(t)) >= 8 and _para(t) in _para(title):
+                continue                               # the title (or one of its lines)
             head_text = t.replace("\n", " ")
             # run-in "Abstract. text" / "Abstract—text"
             mabs = re.match(r"^(abstract)\s*[\.\-–—:]\s*(\S.+)$", head_text, re.I | re.S)
