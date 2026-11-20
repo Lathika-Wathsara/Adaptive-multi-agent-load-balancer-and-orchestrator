@@ -11,6 +11,7 @@ from pathlib import Path
 
 import yaml
 
+from src.orchestrator.real_task_executor import RealTaskExecutor
 from src.orchestrator.agent_adapter import MockAgentAdapter
 from src.orchestrator.router import (
     DEFAULT_CONFIG_PATH,
@@ -178,6 +179,101 @@ class TaskScheduler:
                 if task.task_id not in completed
             ]
 
+    async def execute_specialists(
+        self,
+        paper,
+        *,
+        math_numbers=None,
+        figure_ids=None,
+        image_root=None,
+    ):
+        """Execute explicitly selected specialists as a partial review.
+
+        The caller must supply the intended backend when constructing
+        TaskScheduler. Production runs require LLMClient(use_mock=False).
+        """
+        selections = []
+
+        for agent, values, argument in (
+            ("math_checker", math_numbers, "numbers"),
+            ("figure_checker", figure_ids, "ids"),
+        ):
+            if values is None:
+                continue
+
+            if (
+                not isinstance(values, (list, tuple))
+                or len(values) != 1
+                or not isinstance(values[0], str)
+                or not values[0].strip()
+            ):
+                raise ValueError(
+                    "Select exactly one non-empty identifier per specialist."
+                )
+
+            selections.append((agent, argument, list(values)))
+
+        if not selections:
+            raise ValueError("Select at least one specialist task.")
+
+        executor = RealTaskExecutor(
+            router=self.router,
+            pool=self.pool,
+            timeout=self.task_timeout_seconds,
+        )
+
+        # Validate every selection before starting any model requests.
+        for agent, _, _ in selections:
+            task_type = executor.TASK_TYPES[agent]
+            supported = executor.adapter.SUPPORTED_MODELS[agent]
+
+            candidates = (
+                set(self.router.eligibility[task_type])
+                & set(self.pool.model_limits)
+                & set(supported)
+            )
+            if not candidates:
+                raise ValueError(
+                    f"No enabled pool model supports {agent!r}."
+                )
+
+        started = time.perf_counter()
+        jobs = [
+            asyncio.create_task(
+                executor.execute(
+                    paper=paper,
+                    agent=agent,
+                    image_root=image_root,
+                    **{argument: values},
+                )
+            )
+            for agent, argument, values in selections
+        ]
+
+        try:
+            results = await asyncio.gather(*jobs)
+        except BaseException:
+            for job in jobs:
+                job.cancel()
+            await asyncio.gather(*jobs, return_exceptions=True)
+            raise
+
+        return {
+            "paper_id": paper.id,
+            "review_scope": "selected_specialists_only",
+            "status": (
+                "completed"
+                if all(item["status"] == "completed" for item in results)
+                else "incomplete"
+            ),
+            "tasks_executed": len(results),
+            "results": results,
+            "total_latency": time.perf_counter() - started,
+            "needs_human": any(
+                item["orchestration_review"]["needs_human"]
+                for item in results
+            ),
+        }
     async def _execute_task_body(self, paper, task, completed):
         dependencies = {
             task_id: completed[task_id]

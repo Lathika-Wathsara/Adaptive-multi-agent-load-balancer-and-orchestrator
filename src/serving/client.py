@@ -57,6 +57,7 @@ class LLMClient:
             "stream": False,
             "options": {
                 "temperature": 0,
+                "num_predict": 4096,
             },
         }
 
@@ -69,6 +70,11 @@ class LLMClient:
             )
             response.raise_for_status()
             data = response.json()
+            if data.get("done_reason") == "length":
+                raise RuntimeError(
+                    "Model output reached the 4096-token limit; "
+                    "the response is incomplete."
+                )
 
         elapsed = time.perf_counter() - start
 
